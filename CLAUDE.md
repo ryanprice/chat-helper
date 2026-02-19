@@ -4,7 +4,9 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What this is
 
-A Signal chat bot that listens for slash commands (`/expand`, `/condense`) sent as replies to messages. It uses Ollama (GLM-4.7-flash) with an agentic tool loop (Brave Search API) and always responds via DM to the requester, never in the group chat.
+A Signal chat bot that listens for slash commands sent as replies to messages:
+- `/e [1-10]` — expand/research the quoted message (1 = one sentence, 10 = exhaustive deep-dive, default 5)
+- `/c [1-10]` — condense the quoted message (1 = light trim, 10 = one to five words, default 5) It uses Ollama (GLM-4.7-flash) with an agentic tool loop (Brave Search API) and always responds via DM to the requester, never in the group chat.
 
 The bot runs as a **linked device** on the owner's Signal account (like Signal Desktop), so it receives all messages on the account. It silently ignores everything that isn't a slash command reply.
 
@@ -39,8 +41,8 @@ Signal WebSocket → parse_envelope() → InboundMessage → Agent.handle_messag
                                                               ↓
                                              allowlist check (ALLOWED_NUMBERS)
                                                               ↓
-                                              /expand → tool loop → Ollama → DM
-                                              /condense → tool loop → Ollama → DM
+                                              /e → tool loop → Ollama → DM
+                                              /c → tool loop → Ollama → DM
 ```
 
 **syncMessage handling:** when the bot owner sends a command from their own phone, signal-cli receives a `syncMessage` (copy of sent message) rather than a `dataMessage`. `parse_envelope()` extracts `syncMessage.sentMessage` to handle this case.
@@ -51,8 +53,9 @@ Signal WebSocket → parse_envelope() → InboundMessage → Agent.handle_messag
 - The agentic loop (`src/agent.py:_tool_loop`) caps at `MAX_TOOL_ITERATIONS` then forces a final Ollama call without tools.
 - `TOOL_USE_FALLBACK=true` activates regex parsing of `<tool_call>{...}</tool_call>` tags from model text output — needed if GLM doesn't emit native `tool_calls`.
 - Quote text is wrapped in `<quote>` tags and the system prompt instructs the model to treat it as data, not instructions (prompt injection hardening).
+- Commands are intentionally short (`/e`, `/c`) for easy mobile use. The level argument (1–10) is parsed by `_parse_level()` in `agent.py` and clamped — invalid values silently fall back to 5. Level guidance strings live in `_EXPAND_LEVEL_GUIDANCE` and `_CONDENSE_LEVEL_GUIDANCE` dicts.
 
-**Adding a new command:** add its string to `COMMANDS` in `src/agent.py` and add a handler method following the `_run_expand` / `_run_condense` pattern.
+**Adding a new command:** add its string to `COMMANDS` in `src/agent.py` and add a handler method following the `_run_expand` / `_run_condense` pattern. Keep commands short (e.g. `/e`, `/c`) to minimise typing in mobile Signal.
 
 **Adding a new tool:** create the async function in `src/tools/`, register it in `TOOL_REGISTRY` and add its schema to `TOOL_DEFINITIONS` in `src/tools/registry.py`.
 
