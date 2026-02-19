@@ -5,8 +5,9 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ## What this is
 
 A Signal chat bot that listens for slash commands sent as replies to messages:
-- `/e [1-10]` — expand/research the quoted message (1 = one sentence, 10 = exhaustive deep-dive, default 5)
-- `/c [1-10]` — condense the quoted message (1 = light trim, 10 = one to five words, default 5) It uses Ollama (GLM-4.7-flash) with an agentic tool loop (Brave Search API) and always responds via DM to the requester, never in the group chat.
+- `/e [1-10]` — expand/research the quoted message (1 = one sentence, 10 = exhaustive deep-dive, default 5) — replies via DM
+- `/c [1-10]` — condense the quoted message (1 = light trim, 10 = one to five words, default 5) — replies via DM
+- `/h` — post help text directly in the chat where the command was sent (no quote needed) It uses Ollama (GLM-4.7-flash) with an agentic tool loop (Brave Search API) and always responds via DM to the requester, never in the group chat.
 
 The bot runs as a **linked device** on the owner's Signal account (like Signal Desktop), so it receives all messages on the account. It silently ignores everything that isn't a slash command reply.
 

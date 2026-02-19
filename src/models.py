@@ -23,3 +23,4 @@ class InboundMessage:
     timestamp: int
     group_info: Optional[GroupInfo]
     quote: Optional[Quote]
+    destination_number: Optional[str] = None  # set for sync (owner-sent) 1:1 DMs

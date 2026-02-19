@@ -28,9 +28,11 @@ def parse_envelope(raw: dict) -> Optional[InboundMessage]:
     # When the bot owner sends a command from their own phone, signal-cli
     # receives a syncMessage (copy of sent message) rather than a dataMessage.
     # Extract sentMessage from syncMessage so those commands are also handled.
+    is_sync = False
     data_message = envelope.get("dataMessage")
     if data_message is None:
         data_message = envelope.get("syncMessage", {}).get("sentMessage")
+        is_sync = data_message is not None
 
     if not data_message:
         return None
@@ -62,6 +64,12 @@ def parse_envelope(raw: dict) -> Optional[InboundMessage]:
             group_type=raw_group.get("type", ""),
         )
 
+    destination_number: Optional[str] = None
+    if is_sync:
+        raw_dest = data_message.get("destinationNumber")
+        if raw_dest:
+            destination_number = raw_dest
+
     return InboundMessage(
         source_number=source_number,
         source_name=source_name,
@@ -69,6 +77,7 @@ def parse_envelope(raw: dict) -> Optional[InboundMessage]:
         timestamp=timestamp,
         group_info=group_info,
         quote=quote,
+        destination_number=destination_number,
     )
 
 
@@ -135,6 +144,26 @@ class SignalClient:
         response = await self._http.post(url, json=payload, headers=self._headers)
         response.raise_for_status()
         logger.info("Sent DM to %s", recipient_number)
+
+    async def send_to_chat(self, text: str, msg: "InboundMessage") -> None:
+        """Send a message back to the originating chat (group or individual DM)."""
+        url = f"{self._settings.signal_api_url}/v2/send"
+        payload: dict = {
+            "number": self._settings.signal_phone_number,
+            "message": text,
+        }
+        if msg.group_info:
+            payload["groupId"] = msg.group_info.group_id
+            logger.info("Sending to group %s", msg.group_info.group_id)
+        elif msg.destination_number:
+            # Sync 1:1 DM — destination_number is the other person in the conversation
+            payload["recipients"] = [msg.destination_number]
+            logger.info("Sending to 1:1 chat destination %s", msg.destination_number)
+        else:
+            payload["recipients"] = [msg.source_number]
+            logger.info("Sending to source %s (fallback)", msg.source_number)
+        response = await self._http.post(url, json=payload, headers=self._headers)
+        response.raise_for_status()
 
     async def aclose(self) -> None:
         await self._http.aclose()

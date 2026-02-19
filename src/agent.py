@@ -1,3 +1,4 @@
+import asyncio
 import json
 import logging
 from typing import Any
@@ -10,7 +11,30 @@ from src.tools import TOOL_DEFINITIONS, TOOL_REGISTRY
 
 logger = logging.getLogger(__name__)
 
-COMMANDS = {"/e", "/c"}
+COMMANDS = {"/e", "/c", "/h"}
+
+_BORDER = "〔🤖 chat-helper〕" + "━" * 16
+
+
+def _wrap(text: str) -> str:
+    """Frame any agent-generated message so it's clearly identifiable in chat."""
+    return f"{_BORDER}\n{text}\n{'━' * 34}"
+
+HELP_TEXT = (
+    "📖 Chat Helper\n"
+    "\n"
+    "/e [1–10] — Expand & research the quoted message\n"
+    "  Reply to any message, then type /e\n"
+    "  1 = one sentence  •  10 = exhaustive deep-dive\n"
+    "  Default: /e 5\n"
+    "\n"
+    "/c [1–10] — Condense the quoted message\n"
+    "  Reply to any message, then type /c\n"
+    "  1 = light trim  •  10 = one to five words\n"
+    "  Default: /c 5\n"
+    "\n"
+    "💬 Responses are sent as a DM, unless you're the owner — then they appear in-channel."
+)
 DEFAULT_LEVEL = 5
 
 _EXPAND_LEVEL_GUIDANCE = {
@@ -92,10 +116,14 @@ class Agent:
             logger.warning("Ignoring command from unauthorized number %s", msg.source_number)
             return
 
+        if cmd == "/h":
+            await self._run_help(msg)
+            return
+
         if not msg.quote or not msg.quote.text.strip():
-            await self._sender.send_message(
-                "Please reply to a message with /e [1-10] or /c [1-10].",
-                recipient_number=msg.source_number,
+            await self._reply(
+                _wrap("Please reply to a message with /e [1-10] or /c [1-10]."),
+                msg,
             )
             return
 
@@ -113,15 +141,29 @@ class Agent:
         elif cmd == "/c":
             await self._run_condense(msg, level)
 
+    async def _run_help(self, msg: InboundMessage) -> None:
+        await self._sender.send_to_chat(_wrap(HELP_TEXT), msg)
+
+    def _is_owner(self, msg: InboundMessage) -> bool:
+        return msg.source_number == self._settings.signal_phone_number
+
+    async def _reply(self, text: str, msg: InboundMessage) -> None:
+        """Send reply to the originating chat if owner, otherwise DM the requester."""
+        is_owner = self._is_owner(msg)
+        if is_owner:
+            await self._sender.send_to_chat(text, msg)
+        else:
+            await self._sender.send_message(text, recipient_number=msg.source_number)
+
     async def _run_expand(self, msg: InboundMessage, level: int) -> None:
         user_text = f"Expand on this: <quote>{msg.quote.text}</quote>"
         reply = await self._tool_loop(_expand_system(level), user_text)
-        await self._sender.send_message(reply, recipient_number=msg.source_number)
+        await self._reply(_wrap(reply), msg)
 
     async def _run_condense(self, msg: InboundMessage, level: int) -> None:
         user_text = f"Condense this: <quote>{msg.quote.text}</quote>"
         reply = await self._tool_loop(_condense_system(level), user_text)
-        await self._sender.send_message(reply, recipient_number=msg.source_number)
+        await self._reply(_wrap(reply), msg)
 
     async def _tool_loop(self, system_prompt: str, user_text: str) -> str:
         """Run the agentic tool loop and return the final text response."""
@@ -163,6 +205,8 @@ class Agent:
                         logger.error("Tool %s failed: %s", name, e)
 
                 messages.append({"role": "tool", "content": result, "name": name})
+                # Respect Brave Search free-tier rate limit (1 req/sec)
+                await asyncio.sleep(1.1)
 
         logger.warning("Max tool iterations reached, doing final call without tools")
         final = await self._ollama.chat(messages, tools=None)
