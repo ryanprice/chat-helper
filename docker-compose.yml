@@ -1,0 +1,22 @@
+services:
+  signal-cli-rest-api:
+    image: bbernhard/signal-cli-rest-api:latest
+    environment:
+      - MODE=json-rpc
+      - LOG_LEVEL=info
+    ports:
+      - "8080:8080"
+    volumes:
+      - ./signal-cli-config:/home/.local/share/signal-cli
+
+  chat-helper:
+    build: .
+    depends_on:
+      - signal-cli-rest-api
+    env_file:
+      - .env
+    environment:
+      - SIGNAL_API_URL=http://signal-cli-rest-api:8080
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    restart: unless-stopped
