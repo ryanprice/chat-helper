@@ -66,7 +66,7 @@ def parse_envelope(raw: dict) -> Optional[InboundMessage]:
 
     destination_number: Optional[str] = None
     if is_sync:
-        raw_dest = data_message.get("destinationNumber")
+        raw_dest = data_message.get("destinationNumber") or data_message.get("destinationUuid")
         if raw_dest:
             destination_number = raw_dest
 

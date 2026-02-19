@@ -56,7 +56,8 @@ Signal WebSocket → parse_envelope() → InboundMessage → Agent.handle_messag
 
 **syncMessage handling:** when the bot owner sends a command from their own phone, signal-cli receives a `syncMessage` (copy of sent message) rather than a `dataMessage`. `parse_envelope()` extracts `syncMessage.sentMessage` to handle this. Reply routing uses:
 - `sentMessage.groupInfo.groupId` → send to group
-- `sentMessage.destinationNumber` → send to 1:1 DM partner
+- `sentMessage.destinationNumber` → send to 1:1 DM partner (phone-number contacts)
+- `sentMessage.destinationUuid` → send to 1:1 DM partner (username-only contacts; `destinationNumber` is null for these)
 - fallback → `source_number`
 
 **Key design decisions:**
