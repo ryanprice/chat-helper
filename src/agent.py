@@ -23,15 +23,15 @@ def _wrap(text: str) -> str:
 HELP_TEXT = (
     "📖 Chat Helper\n"
     "\n"
-    "/e [1–10] — Expand & research the quoted message\n"
-    "  Reply to any message, then type /e\n"
-    "  1 = one sentence  •  10 = exhaustive deep-dive\n"
-    "  Default: /e 5\n"
+    "/e [1–10] — Expand & research a topic\n"
+    "  Reply to a message with /e  –or–  include text/URL in the same message\n"
+    "  e.g.  /e 3  •  /e https://example.com  •  some text /e 7\n"
+    "  1 = one sentence  •  10 = exhaustive deep-dive  •  Default: 5\n"
     "\n"
-    "/c [1–10] — Condense the quoted message\n"
-    "  Reply to any message, then type /c\n"
-    "  1 = light trim  •  10 = one to five words\n"
-    "  Default: /c 5\n"
+    "/c [1–10] — Condense text\n"
+    "  Reply to a message with /c  –or–  include text/URL in the same message\n"
+    "  e.g.  /c 3  •  https://youtu.be/xxx /c  •  long text /c 8\n"
+    "  1 = light trim  •  10 = one to five words  •  Default: 5\n"
     "\n"
     "💬 Responses are sent as a DM, unless you're the owner — then they appear in-channel."
 )
@@ -86,14 +86,37 @@ def _condense_system(level: int) -> str:
     )
 
 
-def _parse_level(parts: list[str]) -> int:
-    """Extract optional level argument from command parts, clamped to 1–10."""
-    if len(parts) >= 2:
-        try:
-            return max(1, min(10, int(parts[1])))
-        except ValueError:
-            pass
-    return DEFAULT_LEVEL
+def _parse_command(text: str) -> tuple[str | None, int, str]:
+    """
+    Scan all tokens in *text* for a slash command (anywhere in the message).
+    The optional level digit must come immediately after the command token.
+    Everything else is returned as inline_text (e.g. a URL or free-form content).
+
+    Returns (command, level, inline_text).
+    """
+    tokens = text.strip().split()
+    cmd: str | None = None
+    level = DEFAULT_LEVEL
+    remaining: list[str] = []
+    skip_next = False
+
+    for i, token in enumerate(tokens):
+        if skip_next:
+            skip_next = False
+            continue
+        if token.lower() in COMMANDS and cmd is None:
+            cmd = token.lower()
+            # Consume the immediately-following token if it's a level digit
+            if i + 1 < len(tokens):
+                try:
+                    level = max(1, min(10, int(tokens[i + 1])))
+                    skip_next = True
+                except ValueError:
+                    pass
+        else:
+            remaining.append(token)
+
+    return cmd, level, " ".join(remaining)
 
 
 class Agent:
@@ -103,9 +126,8 @@ class Agent:
         self._ollama = ollama
 
     async def handle_message(self, msg: InboundMessage) -> None:
-        parts = msg.message_text.strip().lower().split()
-        cmd = parts[0]
-        if cmd not in COMMANDS:
+        cmd, level, inline_text = _parse_command(msg.message_text)
+        if cmd is None:
             return
 
         # Access control: silently drop commands from non-allowed numbers.
@@ -120,26 +142,31 @@ class Agent:
             await self._run_help(msg)
             return
 
-        if not msg.quote or not msg.quote.text.strip():
+        # Quote takes priority; fall back to text/URL included inline in the message.
+        quote_text = msg.quote.text.strip() if msg.quote else ""
+        content = quote_text or inline_text.strip()
+
+        if not content:
             await self._reply(
-                _wrap("Please reply to a message with /e [1-10] or /c [1-10]."),
+                _wrap("Please reply to a message, or include text/URL alongside /e or /c."),
                 msg,
             )
             return
 
-        level = _parse_level(parts)
         logger.info(
-            "Handling %s (level %d) from %s (quote length: %d chars)",
+            "Handling %s (level %d) from %s (content length: %d chars)",
             cmd,
             level,
             msg.source_number,
-            len(msg.quote.text),
+            len(content),
         )
 
+        await self._reply("〔🤖🤔...〕", msg)
+
         if cmd == "/e":
-            await self._run_expand(msg, level)
+            await self._run_expand(msg, level, content)
         elif cmd == "/c":
-            await self._run_condense(msg, level)
+            await self._run_condense(msg, level, content)
 
     async def _run_help(self, msg: InboundMessage) -> None:
         await self._sender.send_to_chat(_wrap(HELP_TEXT), msg)
@@ -155,13 +182,13 @@ class Agent:
         else:
             await self._sender.send_message(text, recipient_number=msg.source_number)
 
-    async def _run_expand(self, msg: InboundMessage, level: int) -> None:
-        user_text = f"Expand on this: <quote>{msg.quote.text}</quote>"
+    async def _run_expand(self, msg: InboundMessage, level: int, content: str) -> None:
+        user_text = f"Expand on this: <quote>{content}</quote>"
         reply = await self._tool_loop(_expand_system(level), user_text)
         await self._reply(_wrap(reply), msg)
 
-    async def _run_condense(self, msg: InboundMessage, level: int) -> None:
-        user_text = f"Condense this: <quote>{msg.quote.text}</quote>"
+    async def _run_condense(self, msg: InboundMessage, level: int, content: str) -> None:
+        user_text = f"Condense this: <quote>{content}</quote>"
         reply = await self._tool_loop(_condense_system(level), user_text)
         await self._reply(_wrap(reply), msg)
 
