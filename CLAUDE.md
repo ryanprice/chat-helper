@@ -4,10 +4,14 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What this is
 
-A Signal chat bot that listens for slash commands sent as replies to messages:
-- `/e [1-10]` — expand/research the quoted message (1 = one sentence, 10 = exhaustive deep-dive, default 5)
-- `/c [1-10]` — condense the quoted message (1 = light trim, 10 = one to five words, default 5)
-- `/h` — post help text directly in the chat (no quote needed)
+A Signal chat bot that listens for slash commands. Commands can appear anywhere in the message — as a reply to another message (quoting it), or with inline text/URL in the same message:
+- `/e [1-10]` — expand/research content (1 = one sentence, 10 = exhaustive deep-dive, default 5)
+- `/c [1-10]` — condense content (1 = light trim, 10 = one to five words, default 5)
+- `/h` — post help text directly in the chat (no content needed)
+
+**Content resolution:** quote text (replied-to message) takes priority; if absent, any inline text or URL in the same message is used. If neither is present, the bot sends an error.
+
+**URL handling:** YouTube URLs → `get_transcript`; any other URL → `fetch_page`; no URL → `web_search`.
 
 **Reply routing:** the bot owner (`SIGNAL_PHONE_NUMBER`) gets responses in the same chat/channel where they sent the command. All other users get a DM.
 
@@ -46,6 +50,8 @@ Signal WebSocket → parse_envelope() → InboundMessage → Agent.handle_messag
                                                               ↓
                                              allowlist check (ALLOWED_NUMBERS)
                                                               ↓
+                                         _parse_command() → cmd, level, inline_text
+                                                              ↓
                                     /h → send_to_chat (always in-channel)
                                     /e → tool loop → Ollama → _wrap() → _reply()
                                     /c → tool loop → Ollama → _wrap() → _reply()
@@ -65,14 +71,18 @@ Signal WebSocket → parse_envelope() → InboundMessage → Agent.handle_messag
 - The agentic loop (`src/agent.py:_tool_loop`) caps at `MAX_TOOL_ITERATIONS` then forces a final Ollama call without tools.
 - A 1.1s `asyncio.sleep` after each tool call respects the Brave Search free-tier rate limit (1 req/sec).
 - `TOOL_USE_FALLBACK=true` activates regex parsing of `<tool_call>{...}</tool_call>` tags from model text — needed if GLM doesn't emit native `tool_calls`.
-- Quote text is wrapped in `<quote>` tags and system prompts instruct the model to treat it as data, not instructions (prompt injection hardening).
-- Level argument (1–10) parsed by `_parse_level()`, clamped — invalid values fall back to 5. Guidance strings live in `_EXPAND_LEVEL_GUIDANCE` / `_CONDENSE_LEVEL_GUIDANCE` dicts in `agent.py`.
+- Content (quote or inline text) is wrapped in `<quote>` tags and system prompts instruct the model to treat it as data, not instructions (prompt injection hardening).
+- Command parsing is handled by `_parse_command()` in `agent.py`: scans all tokens for the command (which may appear anywhere in the message), consumes the immediately-following token as the level digit if valid (1–10, clamped), collects remaining tokens as `inline_text`. Invalid or absent level falls back to 5. Guidance strings live in `_EXPAND_LEVEL_GUIDANCE` / `_CONDENSE_LEVEL_GUIDANCE` dicts.
+- An immediate `〔🤖🤔...〕` acknowledgment is sent via `_reply()` as soon as a valid command and content are confirmed, before the tool loop runs.
 
 **Adding a new command:** add its string to `COMMANDS` in `src/agent.py`, add a handler following `_run_expand` / `_run_condense`, and wrap the reply with `_wrap()` before sending.
 
 **Available tools** (called automatically by the LLM during the tool loop):
-- `web_search` — Brave Search API, capped at 10 results, 1.1s delay between calls (free-tier rate limit)
+- `web_search` — Brave Search API, capped at 10 results, 1.1s delay between calls (free-tier rate limit). Used when no URL is present.
 - `get_transcript` — fetches YouTube transcript via `youtube-transcript-api` (v1.0+); uses `YouTubeTranscriptApi().fetch(video_id)` instance API; truncated at 15,000 chars. Supports `youtube.com/watch`, `youtu.be`, `/embed/`, and `/shorts/` URL formats. Works on any public video with captions; fails gracefully on private/age-restricted/caption-disabled videos.
+- `fetch_page` — fetches arbitrary web page content via `httpx`, strips boilerplate (scripts, nav, footer, etc.) with `beautifulsoup4`, and returns readable text truncated at 15,000 chars. Used for any non-YouTube URL.
+
+**Tool selection is guided by tool descriptions** in `TOOL_DEFINITIONS` (`src/tools/registry.py`) — the LLM reads these and picks the appropriate tool automatically.
 
 **Adding a new tool:** create the async function in `src/tools/`, register it in `TOOL_REGISTRY` and add its schema to `TOOL_DEFINITIONS` in `src/tools/registry.py`.
 
@@ -90,3 +100,4 @@ All config comes from `.env` (see `.env.example`). Key vars:
 - Logs never contain message content — only metadata (envelope key names, phone numbers, message lengths)
 - `max_results` for Brave Search is hard-capped at 10 in `src/tools/web_search.py` regardless of what the LLM requests
 - Unauthorized numbers are silently dropped (no response sent, to avoid confirming the bot exists)
+- `fetch_page` sends a generic `User-Agent` header; no cookies or credentials are forwarded
