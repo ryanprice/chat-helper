@@ -2,6 +2,8 @@
 
 A self-hosted Signal bot that runs as a linked device on your account and brings agentic AI tools into your chats. Send a slash command — with a replied-to message, an inline URL, or plain text — and the bot researches, expands, or condenses the content using a local LLM.
 
+<img width="581" height="442" alt="image" src="https://github.com/user-attachments/assets/3c28cbab-ec74-4834-a7a4-79542164dec5" />
+
 ---
 
 ## Features
