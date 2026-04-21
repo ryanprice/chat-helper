@@ -15,6 +15,10 @@ class Settings:
     max_tool_iterations: int
     tool_use_fallback: bool
     allowed_numbers: frozenset[str]  # empty = allow all
+    watcher_enabled: bool
+    watcher_context_window: int
+    watcher_batch_size: int
+    watcher_cooldown_seconds: int
 
     @classmethod
     def from_env(cls) -> "Settings":
@@ -31,4 +35,8 @@ class Settings:
             max_tool_iterations=int(os.getenv("MAX_TOOL_ITERATIONS", "5")),
             tool_use_fallback=os.getenv("TOOL_USE_FALLBACK", "false").lower() == "true",
             allowed_numbers=allowed,
+            watcher_enabled=os.getenv("WATCHER_ENABLED", "false").lower() == "true",
+            watcher_context_window=int(os.getenv("WATCHER_CONTEXT_WINDOW", "20")),
+            watcher_batch_size=int(os.getenv("WATCHER_BATCH_SIZE", "5")),
+            watcher_cooldown_seconds=int(os.getenv("WATCHER_COOLDOWN_SECONDS", "300")),
         )

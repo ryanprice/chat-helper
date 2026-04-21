@@ -1,0 +1,15 @@
+[Unit]
+Description=chat-helper Signal bot
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=rprice
+WorkingDirectory=/home/rprice/myapps/chat-helper
+ExecStart=/home/rprice/myapps/chat-helper/.venv/bin/python -m src.main
+Restart=on-failure
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target

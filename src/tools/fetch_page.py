@@ -1,4 +1,6 @@
+import json
 import logging
+from urllib.parse import urlparse, urlunparse
 
 import httpx
 from bs4 import BeautifulSoup
@@ -19,11 +21,64 @@ def _extract_text(html: str) -> str:
     return "\n".join(lines)
 
 
+_TWITTER_HOSTS = {"x.com", "www.x.com", "twitter.com", "www.twitter.com"}
+
+
+def _is_twitter_url(url: str) -> bool:
+    return urlparse(url).hostname in _TWITTER_HOSTS
+
+
+def _rewrite_twitter_url(url: str) -> str:
+    parsed = urlparse(url)
+    if parsed.hostname in _TWITTER_HOSTS:
+        return urlunparse(parsed._replace(netloc="fxtwitter.com"))
+    return url
+
+
+async def _fetch_tweet(url: str, client: httpx.AsyncClient) -> str:
+    """Use the fxtwitter JSON API to extract tweet text reliably."""
+    parsed = urlparse(url)
+    api_url = urlunparse(parsed._replace(netloc="api.fxtwitter.com"))
+    logger.info("Fetching tweet via fxtwitter API: %s", api_url)
+    response = await client.get(
+        api_url,
+        headers={"User-Agent": "Mozilla/5.0 (compatible; chat-helper/1.0)"},
+    )
+    response.raise_for_status()
+    data = response.json()
+    tweet = data.get("tweet", {})
+    author = tweet.get("author", {})
+    name = author.get("name", "")
+    screen_name = author.get("screen_name", "")
+    text = tweet.get("text", "")
+    created_at = tweet.get("created_at", "")
+    parts = []
+    if name or screen_name:
+        parts.append(f"{name} (@{screen_name})")
+    if created_at:
+        parts.append(created_at)
+    parts.append(text)
+    # include quoted tweet if present
+    quoted = tweet.get("quote", {})
+    if quoted:
+        q_author = quoted.get("author", {})
+        q_text = quoted.get("text", "")
+        q_name = q_author.get("screen_name", "")
+        if q_text:
+            parts.append(f"[Quoting @{q_name}: {q_text}]")
+    return "\n".join(parts)
+
+
 async def fetch_page(url: str) -> str:
     """Fetch the readable text content of a web page and return it as plain text."""
     logger.info("Fetching page: %s", url)
     try:
         async with httpx.AsyncClient(timeout=15.0, follow_redirects=True) as client:
+            if _is_twitter_url(url):
+                text = await _fetch_tweet(url, client)
+                logger.info("fetch_page (tweet): %d chars from %s", len(text), url)
+                return f"[Tweet — {url}]\n\n{text}"
+
             response = await client.get(
                 url,
                 headers={"User-Agent": "Mozilla/5.0 (compatible; chat-helper/1.0)"},
